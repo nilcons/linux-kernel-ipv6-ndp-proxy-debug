@@ -1,0 +1,37 @@
+* kernel compile es devenv setup
+https://www.collabora.com/news-and-blog/blog/2017/01/16/setting-up-qemu-kvm-for-kernel-development/
+https://www.collabora.com/news-and-blog/blog/2017/03/13/kernel-debugging-with-qemu-overview-tools-available/
+* kernel compile
+:e linux-6.2-rc3/include/net/ndisc.h (ND_DEBUG 3)
+* amikor minden setupolva volt dummy0-val, akkor az elso erdekesseg: invalid hop-limit 254
+szerintunk ennek az a magyarazata, hogy ezt az unicast maintenance packetet routolni akarja a kernel
+es a dummy0 forward kozben azt mondja, hogy WTF, 254!
+* ha a dummy0 helyett blackhole van, akkor ez nem tortenik
+valoszinu magyarazat: a blackholozas elobb van, mint ahogy a forward kozben ranezhetnenk a 254-es hop-limitu csomagra
+ez kb logikus, mert ahhoz hogy forwardoljunk, kell tudni hogy hova, es a hova kozben mar blackholozodunk
+* ha a dummy0 helyett nincs blackhole se, akkor is tortenik ez
+magyarazat: ilyenkor a csomag visszaroutolodik az eth0-ra a default route miatt
+es az eth0 kifele lenyegeben a dummy0-t helyettesiti az elozo pontban, guyanugy jon a hibauzenet
+* ha a dummy0 helyett nincs blackhole se, akkor egy extra uzenet is van: ICMPv6: Redirect: target address is not link-local unicast
+ez azt jelenti, hogy a mi kernelunk probalt kuldeni kifele egy redirectet
+mar majdnem kikuldte, de vegul meggondolta magat: ez a redirect invalid lenne kifele
+mert egy nem link-local unicast address-re redirectelne az erdekeltet, amit az rfc nem enged (check TODO!)
+ez is mutatja, hogy ez az ajanlott setup teljesen illegal, nekunk kell a blackhole es a dummy0 mindketto!
+* workaround otlet ezen a ponton: nft-vel visszapumpalni a ttlt es keszen vagyunk
+ez mukodik, a kovetkezo rule kell:
+table ip6 filter {
+	chain input {
+		type filter hook input priority 0;
+		ip6 hoplimit 254 ip6 daddr 2a02:dead:beef:babe::/64 icmpv6 type { nd-neighbor-solicit } counter ip6 hoplimit set 255
+	}
+}
+* de a workaround csak akkor mukodik, ha ott van az eth1 route, amint kiszedem es blackhole marad, akkor nem valaszolunk
+ez pretty undesired, mert igy kivulrol ugy nez ki, hogy:
+  - multicast: valaki van ott, mi mondjuk IGEN!
+  - unicast: tenyleg??? mi hallgatunk :(
+
+tehat ez keveri az ndp_proxy es ndp_responder fogalmat, jelenleg a linux ndp_responder ez viszont proxys
+* rakeresve az ndp_proxy kulcsszora, megtalaljuk az igazi fixet:
+
+
+
