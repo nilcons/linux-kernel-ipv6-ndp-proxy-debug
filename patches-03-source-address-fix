@@ -1,27 +1,30 @@
 diff --git a/net/ipv6/ndisc.c b/net/ipv6/ndisc.c
-index 3a553494ff16..c69c7e002ab4 100644
+index 3a553494ff16..9cfbc8fd1689 100644
 --- a/net/ipv6/ndisc.c
 +++ b/net/ipv6/ndisc.c
-@@ -528,7 +528,7 @@ void ndisc_send_na(struct net_device *dev, const struct in6_addr *daddr,
+@@ -528,15 +528,26 @@ void ndisc_send_na(struct net_device *dev, const struct in6_addr *daddr,
  	struct nd_msg *msg;
  	int optlen = 0;
  
 -	/* for anycast or proxy, solicited_addr != src_addr */
-+	/* the address is on the interface: use it as source */
  	ifp = ipv6_get_ifaddr(dev_net(dev), solicited_addr, dev, 1);
  	if (ifp) {
++		/* for an IP belonging to the interface: use the solicited address */
  		src_addr = solicited_addr;
-@@ -536,7 +536,15 @@ void ndisc_send_na(struct net_device *dev, const struct in6_addr *daddr,
+ 		if (ifp->flags & IFA_F_OPTIMISTIC)
  			override = false;
  		inc_opt |= ifp->idev->cnf.force_tllao;
  		in6_ifa_put(ifp);
 +	} else if (pneigh_lookup(&nd_tbl, dev_net(dev), solicited_addr, dev, 0)) {
-+		/* for proxy: RFC4389 says we should only proxy our
++		/* for proxy: RFC4389 says we should only rewrite our
 +		 * link-local ethernet address, not our actual IPv6
 +		 * source address, so we have to send the packet with
 +		 * the same source as solicited.
 +		 */
 +		src_addr = solicited_addr;
++		override = false;
++		if (in6_dev_get(dev))
++			inc_opt |= in6_dev_get(dev)->cnf.force_tllao;
  	} else {
 +		/* for anycast: solicited_addr != src_addr */
  		if (ipv6_dev_get_saddr(dev_net(dev), dev, daddr,

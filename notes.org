@@ -1,7 +1,20 @@
 * kernel compile es devenv setup
 https://www.collabora.com/news-and-blog/blog/2017/01/16/setting-up-qemu-kvm-for-kernel-development/
 https://www.collabora.com/news-and-blog/blog/2017/03/13/kernel-debugging-with-qemu-overview-tools-available/
-* kernel compile
+
+net-next git
+* image compile: build-image.sh
+* kernel compile: build-kernel.sh
+* demo 1: babe::1234:5678
+tcpdump
+ping
+nud probe
+ip neigh change 2a02:dead:beef:babe::1234:5678 dev qemu nud probe
+* demo 2: babe:aabb:ccdd:1234:5678 ugyanugy
+nud utan:
+2a02:dead:beef:babe:aabb:ccdd:1234:5678 dev qemu FAILED
+EZ A FAILED A HIBA!
+* neighbor discovery ipv6 debugging
 :e net-next/include/net/ndisc.h (ND_DEBUG 3)
 * amikor minden setupolva volt dummy0-val, akkor az elso erdekesseg: invalid hop-limit 254
 szerintunk ennek az a magyarazata, hogy ezt az unicast maintenance packetet routolni akarja a kernel
@@ -30,8 +43,10 @@ ez pretty undesired, mert igy kivulrol ugy nez ki, hogy:
   - multicast: valaki van ott, mi mondjuk IGEN!
   - unicast: tenyleg??? mi hallgatunk :(
 
-tehat ez keveri az ndp_proxy es ndp_responder fogalmat, jelenleg a linux ndp_responder ez viszont proxys
+tehat ez keveri az ndp_proxy es ndp_responder fogalmat, jelenleg a linux ndp_responder ez viszont proxys (de csak a routeot "ellenorzi")
 * rakeresve az ndp_proxy kulcsszora, megtalaljuk az igazi fixet:
+patches-02-hoplimit-fix
+* fix the source address
 * debian
 export DEB_BUILD_PROFILES="nodoc pkg.linux.notoools pkg.linux.nokerneldbg pkg.linux.nokerneldbginfo pkg.linux.nosource nopython pkg.linux.nometa"
 fakeroot make -f debian/rules.gen binary-arch_amd64_none_amd64
