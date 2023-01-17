@@ -1,0 +1,159 @@
+diff -ur linux-6.2-rc3/drivers/net/usb/cdc_mbim.c linux-6.2-rc3-patched/drivers/net/usb/cdc_mbim.c
+--- linux-6.2-rc3/drivers/net/usb/cdc_mbim.c	2023-01-08 18:49:43.000000000 +0100
++++ linux-6.2-rc3-patched/drivers/net/usb/cdc_mbim.c	2023-01-17 01:10:13.543197644 +0100
+@@ -344,8 +344,9 @@
+ 
+ 	/* ipv6_stub != NULL if in6_dev_get returned an inet6_dev */
+ 	ipv6_stub->ndisc_send_na(netdev, &iph->saddr, &msg->target,
+-				 is_router /* router */,
+-				 true /* solicited */,
++                                 false /* proxied */,
++                                 is_router /* router */,
++                                 true /* solicited */,
+ 				 false /* override */,
+ 				 true /* inc_opt */);
+ out:
+diff -ur linux-6.2-rc3/include/net/ipv6_stubs.h linux-6.2-rc3-patched/include/net/ipv6_stubs.h
+--- linux-6.2-rc3/include/net/ipv6_stubs.h	2023-01-08 18:49:43.000000000 +0100
++++ linux-6.2-rc3-patched/include/net/ipv6_stubs.h	2023-01-17 01:10:48.121943381 +0100
+@@ -55,7 +55,7 @@
+ 
+ 	void (*udpv6_encap_enable)(void);
+ 	void (*ndisc_send_na)(struct net_device *dev, const struct in6_addr *daddr,
+-			      const struct in6_addr *solicited_addr,
++                              const struct in6_addr *solicited_addr, bool proxied,
+ 			      bool router, bool solicited, bool override, bool inc_opt);
+ #if IS_ENABLED(CONFIG_XFRM)
+ 	void (*xfrm6_local_rxpmtu)(struct sk_buff *skb, u32 mtu);
+diff -ur linux-6.2-rc3/include/net/ndisc.h linux-6.2-rc3-patched/include/net/ndisc.h
+--- linux-6.2-rc3/include/net/ndisc.h	2023-01-08 18:49:43.000000000 +0100
++++ linux-6.2-rc3-patched/include/net/ndisc.h	2023-01-17 01:32:05.144371050 +0100
+@@ -61,7 +61,7 @@
+ #include <net/neighbour.h>
+ 
+ /* Set to 3 to get tracing... */
+-#define ND_DEBUG 1
++#define ND_DEBUG 3
+ 
+ #define ND_PRINTK(val, level, fmt, ...)				\
+ do {								\
+@@ -459,7 +459,7 @@
+ void ndisc_send_rs(struct net_device *dev,
+ 		   const struct in6_addr *saddr, const struct in6_addr *daddr);
+ void ndisc_send_na(struct net_device *dev, const struct in6_addr *daddr,
+-		   const struct in6_addr *solicited_addr,
++                   const struct in6_addr *solicited_addr, bool proxied_ucast,
+ 		   bool router, bool solicited, bool override, bool inc_opt);
+ 
+ void ndisc_send_redirect(struct sk_buff *skb, const struct in6_addr *target);
+diff -ur linux-6.2-rc3/net/ipv6/addrconf.c linux-6.2-rc3-patched/net/ipv6/addrconf.c
+--- linux-6.2-rc3/net/ipv6/addrconf.c	2023-01-08 18:49:43.000000000 +0100
++++ linux-6.2-rc3-patched/net/ipv6/addrconf.c	2023-01-17 01:11:09.765159380 +0100
+@@ -4232,7 +4232,8 @@
+ 	    (ifp->idev->cnf.ndisc_notify ||
+ 	     dev_net(dev)->ipv6.devconf_all->ndisc_notify)) {
+ 		ndisc_send_na(dev, &in6addr_linklocal_allnodes, &ifp->addr,
+-			      /*router=*/ !!ifp->idev->cnf.forwarding,
++                              /*proxied=*/ false,
++                              /*router=*/ !!ifp->idev->cnf.forwarding,
+ 			      /*solicited=*/ false, /*override=*/ true,
+ 			      /*inc_opt=*/ true);
+ 	}
+diff -ur linux-6.2-rc3/net/ipv6/ip6_output.c linux-6.2-rc3-patched/net/ipv6/ip6_output.c
+--- linux-6.2-rc3/net/ipv6/ip6_output.c	2023-01-08 18:49:43.000000000 +0100
++++ linux-6.2-rc3-patched/net/ipv6/ip6_output.c	2023-01-17 01:21:28.870963164 +0100
+@@ -547,7 +547,7 @@
+ 	    pneigh_lookup(&nd_tbl, net, &hdr->daddr, skb->dev, 0)) {
+ 		int proxied = ip6_forward_proxy_check(skb);
+ 		if (proxied > 0) {
+-			hdr->hop_limit--;
++                        /* hdr->hop_limit--; */
+ 			return ip6_input(skb);
+ 		} else if (proxied < 0) {
+ 			__IP6_INC_STATS(net, idev, IPSTATS_MIB_INDISCARDS);
+diff -ur linux-6.2-rc3/net/ipv6/ndisc.c linux-6.2-rc3-patched/net/ipv6/ndisc.c
+--- linux-6.2-rc3/net/ipv6/ndisc.c	2023-01-08 18:49:43.000000000 +0100
++++ linux-6.2-rc3-patched/net/ipv6/ndisc.c	2023-01-17 01:37:07.757575531 +0100
+@@ -518,7 +518,7 @@
+ EXPORT_SYMBOL(ndisc_send_skb);
+ 
+ void ndisc_send_na(struct net_device *dev, const struct in6_addr *daddr,
+-		   const struct in6_addr *solicited_addr,
++		   const struct in6_addr *solicited_addr, bool proxied_ucast,
+ 		   bool router, bool solicited, bool override, bool inc_opt)
+ {
+ 	struct sk_buff *skb;
+@@ -528,20 +528,29 @@
+ 	struct nd_msg *msg;
+ 	int optlen = 0;
+ 
+-	/* for anycast or proxy, solicited_addr != src_addr */
+-	ifp = ipv6_get_ifaddr(dev_net(dev), solicited_addr, dev, 1);
+-	if (ifp) {
++	ND_PRINTK(2, warn, "ERRGE select address: %d\n", proxied_ucast);
++	if (proxied_ucast) {
++		/* if incoming request was an unicast reachability
++		 * confirmation, that we're proxy for then answer from
++		 * the same address
++		 */
+ 		src_addr = solicited_addr;
+-		if (ifp->flags & IFA_F_OPTIMISTIC)
+-			override = false;
+-		inc_opt |= ifp->idev->cnf.force_tllao;
+-		in6_ifa_put(ifp);
+ 	} else {
+-		if (ipv6_dev_get_saddr(dev_net(dev), dev, daddr,
+-				       inet6_sk(dev_net(dev)->ipv6.ndisc_sk)->srcprefs,
+-				       &tmpaddr))
+-			return;
+-		src_addr = &tmpaddr;
++		/* for anycast, solicited_addr != src_addr */
++		ifp = ipv6_get_ifaddr(dev_net(dev), solicited_addr, dev, 1);
++		if (ifp) {
++			src_addr = solicited_addr;
++			if (ifp->flags & IFA_F_OPTIMISTIC)
++				override = false;
++			inc_opt |= ifp->idev->cnf.force_tllao;
++			in6_ifa_put(ifp);
++		} else {
++			if (ipv6_dev_get_saddr(dev_net(dev), dev, daddr,
++					       inet6_sk(dev_net(dev)->ipv6.ndisc_sk)->srcprefs,
++					       &tmpaddr))
++				return;
++			src_addr = &tmpaddr;
++		}
+ 	}
+ 
+ 	if (!dev->addr_len)
+@@ -590,6 +599,7 @@
+ 			continue;
+ 
+ 		ndisc_send_na(dev, &in6addr_linklocal_allnodes, &ifa->addr,
++			      false,
+ 			      /*router=*/ !!idev->cnf.forwarding,
+ 			      /*solicited=*/ false, /*override=*/ true,
+ 			      /*inc_opt=*/ true);
+@@ -933,7 +943,7 @@
+ 
+ 	if (dad) {
+ 		ndisc_send_na(dev, &in6addr_linklocal_allnodes, &msg->target,
+-			      !!is_router, false, (ifp != NULL), true);
++			      false, !!is_router, false, (ifp != NULL), true);
+ 		goto out;
+ 	}
+ 
+@@ -954,7 +964,13 @@
+ 			     NEIGH_UPDATE_F_OVERRIDE,
+ 			     NDISC_NEIGHBOUR_SOLICITATION, &ndopts);
+ 	if (neigh || !dev->header_ops) {
+-		ndisc_send_na(dev, saddr, &msg->target, !!is_router,
++		bool proxied =
++			(pneigh_lookup(&nd_tbl, dev_net(dev),
++				       &msg->target, dev, 0) &&
++			 ipv6_addr_cmp(daddr, &msg->target) == 0);
++
++		ND_PRINTK(2, warn, "ERRGE proxied: %d\n", proxied);
++		ndisc_send_na(dev, saddr, &msg->target, proxied, !!is_router,
+ 			      true, (ifp != NULL && inc), inc);
+ 		if (neigh)
+ 			neigh_release(neigh);

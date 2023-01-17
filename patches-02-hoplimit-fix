@@ -1,0 +1,12 @@
+diff --git a/net/ipv6/ip6_output.c b/net/ipv6/ip6_output.c
+index 60fd91bb5171..764d1d180101 100644
+--- a/net/ipv6/ip6_output.c
++++ b/net/ipv6/ip6_output.c
+@@ -547,7 +547,6 @@ int ip6_forward(struct sk_buff *skb)
+ 	    pneigh_lookup(&nd_tbl, net, &hdr->daddr, skb->dev, 0)) {
+ 		int proxied = ip6_forward_proxy_check(skb);
+ 		if (proxied > 0) {
+-			hdr->hop_limit--;
+ 			return ip6_input(skb);
+ 		} else if (proxied < 0) {
+ 			__IP6_INC_STATS(net, idev, IPSTATS_MIB_INDISCARDS);

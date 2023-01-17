@@ -1,0 +1,29 @@
+diff --git a/net/ipv6/ndisc.c b/net/ipv6/ndisc.c
+index 3a553494ff16..c69c7e002ab4 100644
+--- a/net/ipv6/ndisc.c
++++ b/net/ipv6/ndisc.c
+@@ -528,7 +528,7 @@ void ndisc_send_na(struct net_device *dev, const struct in6_addr *daddr,
+ 	struct nd_msg *msg;
+ 	int optlen = 0;
+ 
+-	/* for anycast or proxy, solicited_addr != src_addr */
++	/* the address is on the interface: use it as source */
+ 	ifp = ipv6_get_ifaddr(dev_net(dev), solicited_addr, dev, 1);
+ 	if (ifp) {
+ 		src_addr = solicited_addr;
+@@ -536,7 +536,15 @@ void ndisc_send_na(struct net_device *dev, const struct in6_addr *daddr,
+ 			override = false;
+ 		inc_opt |= ifp->idev->cnf.force_tllao;
+ 		in6_ifa_put(ifp);
++	} else if (pneigh_lookup(&nd_tbl, dev_net(dev), solicited_addr, dev, 0)) {
++		/* for proxy: RFC4389 says we should only proxy our
++		 * link-local ethernet address, not our actual IPv6
++		 * source address, so we have to send the packet with
++		 * the same source as solicited.
++		 */
++		src_addr = solicited_addr;
+ 	} else {
++		/* for anycast: solicited_addr != src_addr */
+ 		if (ipv6_dev_get_saddr(dev_net(dev), dev, daddr,
+ 				       inet6_sk(dev_net(dev)->ipv6.ndisc_sk)->srcprefs,
+ 				       &tmpaddr))

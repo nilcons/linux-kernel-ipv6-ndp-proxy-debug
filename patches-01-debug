@@ -1,0 +1,13 @@
+diff --git a/include/net/ndisc.h b/include/net/ndisc.h
+index da7eec8669ec..0759d8f4713d 100644
+--- a/include/net/ndisc.h
++++ b/include/net/ndisc.h
+@@ -61,7 +61,7 @@ enum {
+ #include <net/neighbour.h>
+ 
+ /* Set to 3 to get tracing... */
+-#define ND_DEBUG 1
++#define ND_DEBUG 3
+ 
+ #define ND_PRINTK(val, level, fmt, ...)				\
+ do {								\
