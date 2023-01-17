@@ -32,6 +32,6 @@ ez pretty undesired, mert igy kivulrol ugy nez ki, hogy:
 
 tehat ez keveri az ndp_proxy es ndp_responder fogalmat, jelenleg a linux ndp_responder ez viszont proxys
 * rakeresve az ndp_proxy kulcsszora, megtalaljuk az igazi fixet:
-
-
-
+* debian
+export DEB_BUILD_PROFILES="nodoc pkg.linux.notoools pkg.linux.nokerneldbg pkg.linux.nokerneldbginfo pkg.linux.nosource nopython pkg.linux.nometa"
+fakeroot make -f debian/rules.gen binary-arch_amd64_none_amd64
